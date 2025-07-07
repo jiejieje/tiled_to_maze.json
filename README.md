@@ -2,7 +2,7 @@
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
 
-这是一个简单的工具，可以把Tiled地图编辑器做的地图转换成游戏可以使用的Maze格式和空间树结构。
+这是一个简单的工具，可以把Tiled地图编辑器做的地图转换成可以使用的Maze格式和空间树结构。
 
 ## 这个工具能做什么？
 
@@ -58,7 +58,8 @@
 
 ## 支持什么样的地图？
 
-目前只测试了tiled导出的json地图，其他地图软件请谨慎使用
+目前只测试了tiled导出的json地图，其他地图软件请谨慎使用。
+另外这个项目更新了一个示例地图，你可以通过tiled打开编辑地图或者参考里面的数据结构，也可以通过我的脚本直接转换成maze.json验证这个脚本
 
 ## 常见问题
 
