@@ -93,3 +93,5 @@
 ## 我的其他相关开源项目
 
 **[GenerativeAgents: Alien Town 外星小镇](https://github.com/jiejieje/GenerativeAgents-Alien-Town)** 
+
+**[为小镇打造的 LoRA 模型](https://github.com/jiejieje/top-down-flux-lora)** 
