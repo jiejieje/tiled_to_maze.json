@@ -89,3 +89,7 @@
 ---
 
 希望这个小工具能帮你节省时间！
+
+以下是我的其他开源项目
+
+**[GenerativeAgents: Alien Town 外星小镇](https://github.com/jiejieje/GenerativeAgents-Alien-Town)** 
