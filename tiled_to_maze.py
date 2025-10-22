@@ -7,6 +7,125 @@ import threading
 import queue
 import re
 
+def update_spatial_data_in_agents(spatial_tree_filepath, agents_base_folder_path, progress_queue=None):
+    """
+    Updates the 'spatial' data in agent.json files based on a spatial_tree.json file.
+    """
+    try:
+        if progress_queue:
+            progress_queue.put(("update_status", "开始更新Agent空间数据..."))
+            progress_queue.put(("update_progress", 10))
+
+        # Construct absolute paths if relative paths are given
+        # Assuming this script (tiled_to_maze.py) is in the 'generative_agents' directory
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir) # Goes up one level to the project root
+
+        if not os.path.isabs(spatial_tree_filepath):
+            spatial_tree_filepath = os.path.join(project_root, spatial_tree_filepath)
+        
+        if not os.path.isabs(agents_base_folder_path):
+            agents_base_folder_path = os.path.join(project_root, agents_base_folder_path)
+
+        if progress_queue:
+            progress_queue.put(("update_status", f"读取空间树文件: {os.path.basename(spatial_tree_filepath)}"))
+            progress_queue.put(("update_progress", 20))
+
+        with open(spatial_tree_filepath, 'r', encoding='utf-8') as f:
+            spatial_data_source = json.load(f)
+
+        if 'spatial' not in spatial_data_source:
+            error_msg = f"错误: 'spatial' 键未在 {spatial_tree_filepath} 中找到"
+            if progress_queue:
+                progress_queue.put(("update_status", error_msg))
+                progress_queue.put(("update_progress", 0))
+            print(error_msg)
+            return False, error_msg
+
+        new_spatial_info = spatial_data_source['spatial']
+
+        if progress_queue:
+            progress_queue.put(("update_status", "遍历Agent文件夹..."))
+            progress_queue.put(("update_progress", 30))
+
+        updated_files_count = 0
+        skipped_files_count = 0
+        error_files_count = 0
+        total_agent_folders = [name for name in os.listdir(agents_base_folder_path) if os.path.isdir(os.path.join(agents_base_folder_path, name))]
+        num_agent_folders = len(total_agent_folders)
+
+        for i, agent_folder_name in enumerate(total_agent_folders):
+            agent_folder_path = os.path.join(agents_base_folder_path, agent_folder_name)
+            agent_json_path = os.path.join(agent_folder_path, 'agent.json')
+
+            if progress_queue and num_agent_folders > 0:
+                progress_percent = 30 + int((i / num_agent_folders) * 60) # 30% to 90%
+                progress_queue.put(("update_progress", progress_percent))
+                progress_queue.put(("update_status", f"处理Agent: {agent_folder_name} ({i+1}/{num_agent_folders})"))
+
+            if os.path.isfile(agent_json_path):
+                try:
+                    with open(agent_json_path, 'r', encoding='utf-8') as f:
+                        agent_data = json.load(f)
+                    
+                    agent_data['spatial'] = new_spatial_info
+
+                    with open(agent_json_path, 'w', encoding='utf-8') as f:
+                        json.dump(agent_data, f, ensure_ascii=False, indent=2)
+                    # print(f"Successfully updated {agent_json_path}")
+                    if progress_queue:
+                         progress_queue.put(("log_message", f"成功更新: {os.path.basename(agent_folder_name)}/agent.json"))
+                    updated_files_count += 1
+                except json.JSONDecodeError:
+                    error_msg = f"错误: 无法解码JSON {agent_json_path}. 跳过此文件."
+                    if progress_queue:
+                        progress_queue.put(("log_message", error_msg))
+                    print(error_msg)
+                    error_files_count += 1
+                    continue
+                except Exception as e:
+                    error_msg = f"读取/写入 {agent_json_path} 时出错: {e}. 跳过此文件."
+                    if progress_queue:
+                        progress_queue.put(("log_message", error_msg))
+                    print(error_msg)
+                    error_files_count += 1
+                    continue
+            else:
+                warn_msg = f"警告: agent.json 未在 {agent_folder_path} 中找到"
+                if progress_queue:
+                    progress_queue.put(("log_message", warn_msg))
+                # print(warn_msg)
+                skipped_files_count +=1
+        
+        final_status_msg = f"Agent空间数据更新完成. 更新: {updated_files_count}, 跳过: {skipped_files_count}, 错误: {error_files_count}."
+        if progress_queue:
+            progress_queue.put(("update_status", final_status_msg))
+            progress_queue.put(("update_progress", 100))
+        print(final_status_msg)
+        return True, final_status_msg
+
+    except FileNotFoundError as e:
+        error_msg = f"错误: 文件未找到 - {e}"
+        if progress_queue:
+            progress_queue.put(("update_status", error_msg))
+            progress_queue.put(("update_progress", 0))
+        print(error_msg)
+        return False, error_msg
+    except json.JSONDecodeError as e:
+        error_msg = f"错误: JSON解码失败 - {e}"
+        if progress_queue:
+            progress_queue.put(("update_status", error_msg))
+            progress_queue.put(("update_progress", 0))
+        print(error_msg)
+        return False, error_msg
+    except Exception as e:
+        error_msg = f"更新Agent空间数据时发生意外错误: {e}"
+        if progress_queue:
+            progress_queue.put(("update_status", error_msg))
+            progress_queue.put(("update_progress", 0))
+        print(error_msg)
+        return False, error_msg
+
 def convert_tiled_to_maze(tiled_filepath, maze_filepath, progress_queue=None):
     """
     将 JSON 地图文件转换为 maze.json 格式。
@@ -57,8 +176,31 @@ def convert_tiled_to_maze(tiled_filepath, maze_filepath, progress_queue=None):
             progress_queue.put(("update_status", "处理图块集..."))
             progress_queue.put(("update_progress", 30))
             
+        tiled_dir = os.path.dirname(tiled_filepath)
         for tileset in tiled_data["tilesets"]:
-            tileset_name = tileset["image"].split('/')[-1].split('.')[0]
+            if "source" in tileset:
+                # 处理外部 tileset
+                tsj_path = os.path.join(tiled_dir, tileset["source"].replace("\\", "/"))
+                try:
+                    with open(tsj_path, 'r', encoding='utf-8') as tsj_f:
+                        external_tileset = json.load(tsj_f)
+                    image_path = external_tileset.get("image")
+                    if not image_path:
+                        raise ValueError(f"External tileset {tileset['source']} missing 'image' key")
+                    tileset_name = os.path.basename(image_path).split('.')[0]
+                except FileNotFoundError:
+                    # Fallback: use basename of source if tsj not found
+                    source_basename = os.path.basename(tileset["source"])
+                    tileset_name = os.path.splitext(source_basename)[0]
+                    if progress_queue:
+                        progress_queue.put(("log_message", f"警告: 未找到外部tileset {tsj_path}, 使用回退名称 {tileset_name}"))
+            else:
+                # 内部 tileset
+                image_path = tileset.get("image")
+                if not image_path:
+                    raise ValueError("Tileset missing 'image' key")
+                tileset_name = os.path.basename(image_path).split('.')[0]
+            
             maze_data["map"]["tileset_groups"]["group_1"].append(tileset_name)
 
         # 分离不同类型的图层
@@ -479,6 +621,10 @@ class TiledToSpatialTreeConverter:
         self.tree_filename = tk.StringVar()
         self.tree_filename.set("spatial_tree.json")
         
+        # 添加更新Agent空间数据按钮
+        self.update_agents_spatial_data_button = tk.Button(self.master, text="更新Agent空间数据", command=self.run_update_agents_spatial_data, state=tk.DISABLED)
+        self.update_agents_spatial_data_button.pack(pady=5)
+        
         # 添加移除数字前缀选项
         self.remove_prefix = tk.BooleanVar()
         self.remove_prefix.set(True)  # 默认勾选
@@ -495,7 +641,64 @@ class TiledToSpatialTreeConverter:
         
         # 设置周期性检查队列的任务
         self.check_queue()
+
+    def run_update_agents_spatial_data(self):
+        # 禁用按钮，防止重复点击
+        self.update_agents_spatial_data_button.config(state=tk.DISABLED)
+        self.status_label.config(text="正在更新Agent空间数据...")
+        self.progress_bar['value'] = 0
+
+        # 启动后台线程执行更新操作
+        threading.Thread(target=self.perform_agent_spatial_update, daemon=True).start()
+
+    def perform_agent_spatial_update(self):
+        # 定义默认路径，这些路径相对于项目根目录
+        # 项目根目录是 tiled_to_maze.py 所在目录的上一级
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        project_root = os.path.dirname(script_dir)
+
+        default_spatial_tree_filename = "spatial_tree.json"
+        default_agents_base_folder = os.path.join("generative_agents", "frontend", "static", "assets", "village", "agents")
+
+        # 获取输出目录，如果为空，则使用项目根目录
+        output_dir = self.output_dir_path.get()
+        if not output_dir:
+            output_dir = project_root
         
+        # 构造 spatial_tree.json 的完整路径
+        # 优先使用输出目录下的 spatial_tree.json，如果不存在，则使用项目根目录下的
+        spatial_tree_path_in_output = os.path.join(output_dir, self.tree_filename.get() or default_spatial_tree_filename)
+        spatial_tree_path_in_root = os.path.join(project_root, self.tree_filename.get() or default_spatial_tree_filename)
+
+        if os.path.exists(spatial_tree_path_in_output):
+            spatial_tree_filepath = spatial_tree_path_in_output
+        elif os.path.exists(spatial_tree_path_in_root):
+            spatial_tree_filepath = spatial_tree_path_in_root
+        else:
+            self.progress_queue.put(("update_status", f"错误: 未找到 {default_spatial_tree_filename} 文件"))
+            self.progress_queue.put(("update_progress", 0))
+            # 重新启用按钮
+            self.progress_queue.put(("enable_button", "update_agents_spatial_data_button"))
+            return
+
+        # agents_base_folder_path 总是相对于项目根目录
+        agents_base_folder_path = os.path.join(project_root, default_agents_base_folder)
+
+        if not os.path.exists(agents_base_folder_path):
+            self.progress_queue.put(("update_status", f"错误: Agent基础文件夹 {agents_base_folder_path} 不存在"))
+            self.progress_queue.put(("update_progress", 0))
+            self.progress_queue.put(("enable_button", "update_agents_spatial_data_button"))
+            return
+
+        success, message = update_spatial_data_in_agents(spatial_tree_filepath, agents_base_folder_path, self.progress_queue)
+        
+        # 确保在主线程中更新UI
+        self.progress_queue.put(("enable_button", "update_agents_spatial_data_button"))
+        if success:
+            self.progress_queue.put(("log_message", "Agent空间数据更新成功完成。"))
+        else:
+            self.progress_queue.put(("log_message", f"Agent空间数据更新失败: {message}"))
+
     def create_widgets(self):
         # Tiled文件选择
         tiled_frame = tk.Frame(self.master)
@@ -743,4 +946,4 @@ class TiledToSpatialTreeConverter:
 if __name__ == "__main__":
     root = tk.Tk()
     app = TiledToSpatialTreeConverter(root)
-    root.mainloop() 
+    root.mainloop()
