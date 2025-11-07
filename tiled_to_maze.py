@@ -6,6 +6,7 @@ from collections import defaultdict
 import threading
 import queue
 import re
+import xml.etree.ElementTree as ET
 
 def update_spatial_data_in_agents(spatial_tree_filepath, agents_base_folder_path, progress_queue=None):
     """
@@ -182,11 +183,22 @@ def convert_tiled_to_maze(tiled_filepath, maze_filepath, progress_queue=None):
                 # 处理外部 tileset
                 tsj_path = os.path.join(tiled_dir, tileset["source"].replace("\\", "/"))
                 try:
-                    with open(tsj_path, 'r', encoding='utf-8') as tsj_f:
-                        external_tileset = json.load(tsj_f)
-                    image_path = external_tileset.get("image")
-                    if not image_path:
-                        raise ValueError(f"External tileset {tileset['source']} missing 'image' key")
+                    _, ext = os.path.splitext(tsj_path)
+                    if ext.lower() == ".tsx":
+                        try:
+                            tree = ET.parse(tsj_path)
+                        except ET.ParseError as parse_err:
+                            raise ValueError(f"解析TSX tileset {tileset['source']} 失败: {parse_err}") from parse_err
+                        image_elem = tree.getroot().find("image")
+                        if image_elem is None or not image_elem.get("source"):
+                            raise ValueError(f"TSX tileset {tileset['source']} 缺少 image source")
+                        image_path = image_elem.get("source")
+                    else:
+                        with open(tsj_path, 'r', encoding='utf-8') as tsj_f:
+                            external_tileset = json.load(tsj_f)
+                        image_path = external_tileset.get("image")
+                        if not image_path:
+                            raise ValueError(f"External tileset {tileset['source']} missing 'image' key")
                     tileset_name = os.path.basename(image_path).split('.')[0]
                 except FileNotFoundError:
                     # Fallback: use basename of source if tsj not found
@@ -194,6 +206,12 @@ def convert_tiled_to_maze(tiled_filepath, maze_filepath, progress_queue=None):
                     tileset_name = os.path.splitext(source_basename)[0]
                     if progress_queue:
                         progress_queue.put(("log_message", f"警告: 未找到外部tileset {tsj_path}, 使用回退名称 {tileset_name}"))
+                except (json.JSONDecodeError, ValueError) as parse_error:
+                    source_basename = os.path.basename(tileset["source"])
+                    tileset_name = os.path.splitext(source_basename)[0]
+                    warn_msg = f"警告: 解析tileset {tileset['source']} 失败: {parse_error}, 使用回退名称 {tileset_name}"
+                    if progress_queue:
+                        progress_queue.put(("log_message", warn_msg))
             else:
                 # 内部 tileset
                 image_path = tileset.get("image")
